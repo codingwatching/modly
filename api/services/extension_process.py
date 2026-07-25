@@ -372,14 +372,24 @@ class ExtensionProcess:
         next load() starts a fresh subprocess.
         """
         proc = self._proc
-        self._proc   = None
         self._loaded = False
         if proc and proc.poll() is None:
             try:
                 proc.kill()
                 proc.wait(timeout=5)
-            except Exception:
-                pass
+            except Exception as exc:
+                # Keep the process reference so callers can verify that the
+                # worker may still be alive and refuse to mutate its venv.
+                self._proc = proc
+                raise RuntimeError(
+                    f"[{self.MODEL_ID}] Could not stop extension subprocess"
+                ) from exc
+            if proc.poll() is None:
+                self._proc = proc
+                raise RuntimeError(
+                    f"[{self.MODEL_ID}] Extension subprocess is still running"
+                )
+        self._proc = None
         self._drain_queue()
 
     def _drain_queue(self) -> None:

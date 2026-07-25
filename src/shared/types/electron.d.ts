@@ -291,6 +291,7 @@ declare global {
           success:      boolean
           error?:       string
           cancelled?:   boolean
+          needsRepair?: boolean
           extensionId?: string
           extension?:   AnyExtension
           localPath?:   string
