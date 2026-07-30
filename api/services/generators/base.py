@@ -17,12 +17,22 @@ def select_device() -> str:
     MPS (Apple Silicon) -> CPU. Extensions should call this instead of
     hardcoding `.cuda()` / `torch.cuda.is_available()` so device logic lives
     in one place and Windows/CUDA behavior is unaffected.
+
+    PyTorch only falls back to CPU for MPS ops with no Metal kernel (e.g. 3D
+    pooling) — instead of raising NotImplementedError — if
+    PYTORCH_ENABLE_MPS_FALLBACK=1 is set *before the process's first `import
+    torch`*. That's set for every extension subprocess in
+    ExtensionProcess._build_env(); the setdefault() below is just a
+    best-effort backstop for callers that reach select_device() before
+    importing torch themselves.
     """
+    import os
     import torch
 
     if torch.cuda.is_available():
         return "cuda"
     if torch.backends.mps.is_available():
+        os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         return "mps"
     return "cpu"
 
