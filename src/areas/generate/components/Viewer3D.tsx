@@ -76,6 +76,7 @@ function CanvasCapture({
   const { gl } = useThree()
   useEffect(() => {
     domRef.current = gl.domElement
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- domRef is a stable ref
   }, [gl])
   return null
 }
@@ -245,6 +246,7 @@ function SceneMeshModel({
     })
     const roundedTriangles = Math.round(triangles)
     onStats({ vertices: Math.round(vertices), triangles: roundedTriangles })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- recompute on scene change only; onStats is a stable callback
   }, [scene])
 
   // Thumbnail capture (kept for future use)
@@ -846,6 +848,7 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS, gizmo
     setSelected(false)
     setViewMode('solid')
     setStoreMeshStats(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset only when the model changes; setters are stable
   }, [modelUrl])
 
   // Clear the shared selection when the viewer unmounts — the store would
@@ -863,6 +866,7 @@ export default function Viewer3D({ lightSettings = DEFAULT_LIGHT_SETTINGS, gizmo
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- setSelected is a stable store setter
   }, [selected, setCurrentJob])
 
   const handleScreenshot = () => {

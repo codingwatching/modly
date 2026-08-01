@@ -446,8 +446,8 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
   workflow:      Workflow
   allExtensions: ReturnType<typeof buildAllWorkflowExtensions>
 }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(workflow.nodes as FlowNode[])
-  const [edges, setEdges, onEdgesChange] = useEdgesState(workflow.edges as FlowEdge[])
+  const [nodes, setNodes] = useNodesState(workflow.nodes as FlowNode[])
+  const [edges]           = useEdgesState(workflow.edges as FlowEdge[])
   const { updateNodeData }               = useReactFlow()
   const { navigate }                     = useNavStore()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -457,6 +457,10 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
     setNodes((nds) => nds.map((n) =>
       n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n,
     ))
+    // Push params live so a paused/looping run uses the latest values on the next node start.
+    if (patch.params) {
+      useWorkflowRunStore.getState().setLiveNodeParams(nodeId, patch.params as Record<string, unknown>)
+    }
   }, [setNodes])
 
   // ─── Tab sync ──────────────────────────────────────────────────────────────
@@ -499,6 +503,7 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
     if (runState.status !== 'done' || !runState.outputUrl) return
     const out = nodes.find((n) => n.type === 'outputNode')
     if (out) updateNodeData(out.id, { params: { outputUrl: runState.outputUrl } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to run completion; nodes/updateNodeData read at that point
   }, [runState.status, runState.outputUrl])
 
   const preflightIssues = useMemo(() => {
@@ -524,7 +529,14 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
       showToast(firstPreflightIssue)
       return
     }
-    const wf: Workflow = { ...workflow, nodes: nodes as WFNode[], edges: edges as WFEdge[] }
+    // Persist the edited params so they survive remounts and are the values actually used.
+    const wf: Workflow = {
+      ...workflow,
+      nodes: nodes as WFNode[],
+      edges: edges as WFEdge[],
+      updatedAt: new Date().toISOString(),
+    }
+    useWorkflowsStore.getState().save(wf)
     run(wf, allExtensions)
   }, [firstPreflightIssue, nodes, edges, workflow, allExtensions, run, showToast])
 
@@ -637,6 +649,7 @@ export default function WorkflowPanel() {
     [modelExtensions, processExtensions],
   )
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once on mount
   useEffect(() => { load(); loadExtensions() }, [])
 
   // Sync when navigated here from the workflow editor (activeId set externally)
@@ -646,6 +659,7 @@ export default function WorkflowPanel() {
 
   useEffect(() => {
     if (!selectedId && workflows.length > 0) setSelectedId(workflows[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- default selection reacts to workflows list only
   }, [workflows])
 
   const workflow = workflows.find((w) => w.id === selectedId) ?? null
@@ -690,6 +704,7 @@ export default function WorkflowPanel() {
           {workflow ? (
             <ReactFlowProvider>
               <EmbeddedCanvas
+                key={workflow.id}
                 workflow={workflow}
                 allExtensions={allExtensions}
               />
