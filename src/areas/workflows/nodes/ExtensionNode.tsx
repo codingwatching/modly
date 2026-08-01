@@ -1,4 +1,4 @@
-import { useCallback, useRef, useLayoutEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useLayoutEffect, useState } from 'react'
 import { Handle, Position, useReactFlow } from '@xyflow/react'
 import { useExtensionsStore } from '@shared/stores/extensionsStore'
 import { buildAllWorkflowExtensions } from '../mockExtensions'
@@ -10,12 +10,14 @@ import BaseNode from './BaseNode'
 // ─── Handle colors ────────────────────────────────────────────────────────────
 
 const HANDLE_COLOR: Record<string, string> = {
+  audio: '#34d399',
   image: '#38bdf8',
   mesh:  '#a78bfa',
   text:  '#fbbf24',
 }
 
 const TAG_CLS: Record<string, string> = {
+  audio: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400',
   image: 'border-sky-500/30 bg-sky-500/10 text-sky-400',
   mesh:  'border-violet-500/30 bg-violet-500/10 text-violet-400',
   text:  'border-amber-500/30 bg-amber-500/10 text-amber-400',
@@ -23,7 +25,10 @@ const TAG_CLS: Record<string, string> = {
 
 // ─── Param control ────────────────────────────────────────────────────────────
 
-const inputCls = 'w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60'
+// nodrag — without it, React Flow starts dragging the node on mousedown inside
+// these fields, so click-drag text selection (or opening a <select>) moves the
+// node instead.
+const inputCls = 'nodrag w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-accent/60'
 
 function IntInput({ value, onChange, className }: { value: number; onChange: (v: number) => void; className: string }) {
   const [text, setText] = useState(String(value))
@@ -74,11 +79,46 @@ function FloatInput({ value, onChange, className }: { value: number; onChange: (
   )
 }
 
-function ParamControl({ param, value, onChange }: {
+/** Dropdown of the files inside the folder held by another param (dir_from). */
+function FileSelectControl({ param, value, dirValue, onChange }: {
   param:    ParamSchema
-  value:    number | string
-  onChange: (v: number | string) => void
+  value:    string
+  dirValue: string
+  onChange: (v: string) => void
 }) {
+  const [files, setFiles] = useState<string[]>([])
+  const extsKey = (param.extensions ?? []).join(',')
+  useEffect(() => {
+    let alive = true
+    if (!dirValue) { setFiles([]); return }
+    window.electron.fs.listFiles(dirValue, param.extensions ?? undefined).then((list) => {
+      if (alive) setFiles(list)
+    }).catch(() => { if (alive) setFiles([]) })
+    return () => { alive = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dirValue, extsKey])
+
+  return (
+    <select value={value} disabled={!dirValue} onChange={(e) => onChange(e.target.value)}
+      className={`${inputCls} ${!dirValue ? 'opacity-50 cursor-not-allowed' : ''}`}>
+      <option value="">{!dirValue ? 'Pick a folder first…' : files.length === 0 ? 'No files found' : 'Select…'}</option>
+      {/* Keep a saved value visible even if it's no longer in the folder listing. */}
+      {value && !files.includes(value) && <option value={value}>{value} (missing)</option>}
+      {files.map((f) => <option key={f} value={f}>{f}</option>)}
+    </select>
+  )
+}
+
+function ParamControl({ param, value, onChange, resolvedParams }: {
+  param:          ParamSchema
+  value:          number | string
+  onChange:       (v: number | string) => void
+  resolvedParams: Record<string, unknown>
+}) {
+  if (param.type === 'file-select') {
+    const dirValue = String(resolvedParams[param.dir_from ?? ''] ?? '')
+    return <FileSelectControl param={param} value={String(value ?? '')} dirValue={dirValue} onChange={onChange} />
+  }
   if (param.type === 'select') {
     return (
       <select value={value} onChange={(e) => onChange(e.target.value)} className={inputCls}>
@@ -145,7 +185,10 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
   }, [isMulti, inputs?.length])
 
   const patchParam = useCallback((key: string, val: number | string) => {
-    updateNodeData(id, { params: { ...data.params, [key]: val } })
+    const params = { ...data.params, [key]: val }
+    updateNodeData(id, { params })
+    // Push live so a paused/looping run picks up the change on the next node start.
+    useWorkflowRunStore.getState().setLiveNodeParams(id, params)
   }, [id, data.params, updateNodeData])
 
   const paramById = new Map(ext?.params.map((p) => [p.id, p]))
@@ -162,23 +205,26 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
   const ioSubheader = isMulti ? (
     // Multi-input layout: one row per input, output on first row
     <div className="flex flex-col divide-y divide-zinc-800/40">
-      {inputs.map((inputType, i) => (
-        <div key={i} ref={(el) => { if (el) handleRefs.current[i] = el }} className="flex items-center justify-between px-3 py-2">
-          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[inputType] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
-            {inputType}
-          </span>
-          {i === 0 && !isTerminal && (
-            <>
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
-                <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-              </svg>
-              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[ext?.output ?? ''] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
-                {ext?.output ?? '—'}
-              </span>
-            </>
-          )}
-        </div>
-      ))}
+      <div ref={ioRowRef} className="flex items-center justify-between px-3 py-2">
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[inputs[0]] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+          {ext?.inputLabels?.[0] ?? inputs[0]}
+        </span>
+        {!isTerminal && (
+          <>
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
+              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+            </svg>
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[ext?.output ?? ''] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+              {ext?.output ?? '—'}
+            </span>
+          </>
+        )}
+      </div>
+      <div ref={ioRow2Ref} className="flex items-center px-3 py-2">
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[inputs[1]] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+          {ext?.inputLabels?.[1] ?? inputs[1]}
+        </span>
+      </div>
     </div>
   ) : (
     // Single-input layout (existing behavior)
@@ -254,17 +300,24 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
     >
       {hasParams && (
         <div className="px-3 pb-3 pt-2.5 flex flex-col gap-2">
-          {ext!.params.filter(isVisible).map((param) => {
-            const val = (data.params[param.id] ?? param.default) as number | string
-            return (
-              <div key={param.id} className="flex items-center gap-2">
-                <label className="text-[10px] text-zinc-500 w-24 shrink-0 leading-tight">{param.label}</label>
-                <div className="flex-1">
-                  <ParamControl param={param} value={val} onChange={(v) => patchParam(param.id, v)} />
-                </div>
-              </div>
+          {(() => {
+            // Effective values of every param (user value or schema default) —
+            // lets file-select params resolve their source folder (dir_from).
+            const resolvedParams = Object.fromEntries(
+              (ext?.params ?? []).map((p) => [p.id, data.params[p.id] ?? p.default]),
             )
-          })}
+            return ext!.params.filter(isVisible).map((param) => {
+              const val = (data.params[param.id] ?? param.default) as number | string
+              return (
+                <div key={param.id} className="flex items-center gap-2">
+                  <label className="text-[10px] text-zinc-500 w-24 shrink-0 leading-tight">{param.label}</label>
+                  <div className="flex-1">
+                    <ParamControl param={param} value={val} onChange={(v) => patchParam(param.id, v)} resolvedParams={resolvedParams} />
+                  </div>
+                </div>
+              )
+            })
+          })()}
         </div>
       )}
     </BaseNode>
