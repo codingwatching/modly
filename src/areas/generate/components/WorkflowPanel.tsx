@@ -15,6 +15,8 @@ import { buildAllWorkflowExtensions, getWorkflowExtension } from '@areas/workflo
 import { validateWorkflowPreflight } from '@areas/workflows/preflight'
 import type { WorkflowExtension } from '@areas/workflows/mockExtensions'
 import type { Workflow, WFNode, WFEdge, ParamSchema } from '@shared/types/electron.d'
+import { PICKER_LABELS, openParamPicker, resolvePickerIntent } from '@shared/utils/paramPicker'
+import { PickerIcon } from '@shared/components/ui'
 import ChatPanel from './ChatPanel'
 
 type PanelMode = 'basic' | 'chat'
@@ -126,17 +128,17 @@ function ParamField({ param, value, onChange }: {
     )
   }
   if (param.type === 'string') {
+    const intent = resolvePickerIntent(param)
     return (
       <div className="flex items-center gap-1">
         <input type="text" value={value as string} placeholder={param.tooltip ?? ''}
           onChange={(e) => onChange(e.target.value)} className={`${inputCls} flex-1`} />
         <button onClick={async () => {
-          const p = await window.electron.fs.selectDirectory()
+          const p = await openParamPicker(param, window.electron.fs)
           if (p) onChange(p)
-        }} className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-          </svg>
+        }} title={PICKER_LABELS[intent]} aria-label={PICKER_LABELS[intent]}
+          className="shrink-0 flex items-center justify-center w-6 h-6 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200 transition-colors">
+          <PickerIcon intent={intent} />
         </button>
       </div>
     )
