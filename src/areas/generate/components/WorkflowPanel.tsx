@@ -447,7 +447,7 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
   allExtensions: ReturnType<typeof buildAllWorkflowExtensions>
 }) {
   const [nodes, setNodes] = useNodesState(workflow.nodes as FlowNode[])
-  const [edges]           = useEdgesState(workflow.edges as FlowEdge[])
+  const [edges, setEdges] = useEdgesState(workflow.edges as FlowEdge[])
   const { updateNodeData }               = useReactFlow()
   const { navigate }                     = useNavStore()
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -473,7 +473,20 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
     setNodes(workflow.nodes as FlowNode[])
     setEdges(workflow.edges as FlowEdge[])
     lastSyncedAtRef.current = workflow.updatedAt
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on updatedAt only; adding nodes/edges would resync on every local edit
   }, [workflow.updatedAt])
+
+  // Persist to the store and claim the echo so the sync effect above does not
+  // treat our own write as an external change. The claim is optimistic — the store
+  // is updated before save() resolves — and is rolled back when the write fails, so
+  // a failed save never silently replaces the canvas with the last persisted version.
+  const saveAndClaim = useCallback((updated: Workflow) => {
+    const prevSyncedAt = lastSyncedAtRef.current
+    lastSyncedAtRef.current = updated.updatedAt
+    void useWorkflowsStore.getState().save(updated).then((res) => {
+      if (!res.success) lastSyncedAtRef.current = prevSyncedAt
+    })
+  }, [])
 
   // Debounced save to the store when local state changes (Generate→Workflows)
   // No cleanup return — lets the timer fire even if user navigates away
@@ -481,16 +494,15 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
     if (!didMountRef.current) { didMountRef.current = true; return }
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
-      const now = new Date().toISOString()
-      const updated: Workflow = {
+      saveTimer.current = null
+      saveAndClaim({
         ...workflow,
         nodes: nodes as WFNode[],
         edges: edges as WFEdge[],
-        updatedAt: now,
-      }
-      lastSyncedAtRef.current = now
-      useWorkflowsStore.getState().save(updated)
+        updatedAt: new Date().toISOString(),
+      })
     }, 500)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- debounce on editable state; latest workflow read in the timeout
   }, [nodes, edges])
 
   const currentMeshUrl = useAppStore((s) => s.currentJob?.outputUrl)
@@ -530,15 +542,17 @@ function EmbeddedCanvas({ workflow, allExtensions }: {
       return
     }
     // Persist the edited params so they survive remounts and are the values actually used.
+    // Drop the pending debounce — this save supersedes it.
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null }
     const wf: Workflow = {
       ...workflow,
       nodes: nodes as WFNode[],
       edges: edges as WFEdge[],
       updatedAt: new Date().toISOString(),
     }
-    useWorkflowsStore.getState().save(wf)
+    saveAndClaim(wf)
     run(wf, allExtensions)
-  }, [firstPreflightIssue, nodes, edges, workflow, allExtensions, run, showToast])
+  }, [firstPreflightIssue, nodes, edges, workflow, allExtensions, run, showToast, saveAndClaim])
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
