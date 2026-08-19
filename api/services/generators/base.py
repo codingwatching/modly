@@ -155,7 +155,7 @@ class BaseGenerator(ABC):
 
         from huggingface_hub import snapshot_download
 
-        print(f"[{self.__class__.__name__}] Downloading {self.hf_repo} → {self.model_dir} …")
+        print(f"[{self.__class__.__name__}] Downloading {self.hf_repo} -> {self.model_dir} ...")
         self.model_dir.mkdir(parents=True, exist_ok=True)
 
         ignore = list(self.hf_skip_prefixes) + [
