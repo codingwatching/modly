@@ -73,6 +73,9 @@ class ExtensionProcess:
         env["MODELS_DIR"]    = str(MODELS_DIR)
         env["WORKSPACE_DIR"] = str(WORKSPACE_DIR)
         env["MODLY_API_DIR"] = str(Path(__file__).parent.parent)
+        # Force the worker's Python stdio to UTF-8 so it matches the UTF-8
+        # pipe readers below regardless of the OS locale (cp1252/cp932).
+        env["PYTHONUTF8"] = "1"
         if sys.platform == "darwin":
             env.setdefault("NUMBA_DISABLE_JIT", "1")
             # Must be set before the subprocess's first `import torch` — PyTorch
@@ -116,6 +119,8 @@ class ExtensionProcess:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 env=self._build_env(),
             )
