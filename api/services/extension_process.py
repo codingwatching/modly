@@ -75,6 +75,12 @@ class ExtensionProcess:
         env["MODLY_API_DIR"] = str(Path(__file__).parent.parent)
         if sys.platform == "darwin":
             env.setdefault("NUMBA_DISABLE_JIT", "1")
+            # Must be set before the subprocess's first `import torch` — PyTorch
+            # reads this once to decide whether MPS ops with no Metal kernel
+            # (e.g. 3D pooling) fall back to CPU or raise NotImplementedError.
+            # Setting it inside generator.py is too late, since generator.py
+            # itself imports torch before calling select_device().
+            env.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
         # Pass the exact model_dir so runner.py doesn't have to re-derive it
         # from manifest["id"] (which is the ext_id, not the composite node id).
         # runner.py extracts the node id from MODEL_DIR's trailing path component.
