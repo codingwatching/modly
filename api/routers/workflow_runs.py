@@ -5,7 +5,13 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from routers.generation import _cancel_events, _cancelled, _jobs, _run_generation
+from routers.generation import (
+    _cancel_events,
+    _cancelled,
+    _jobs,
+    _run_generation,
+    sanitize_collection,
+)
 from schemas.generation import JobStatus
 from services.generator_registry import generator_registry
 
@@ -27,10 +33,17 @@ async def create_run_from_image(
     background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     model_id: str = Form("sf3d"),
+    # Where the result is filed. The legacy /generate/from-image already accepts this; the
+    # canonical endpoint hardcoded "Default", so a run driven over REST/MCP landed in a folder
+    # the Library does not index and stayed invisible in the app (#238). Same field, same
+    # sanitizer, so both surfaces route output the same way.
+    collection: str = Form("Default"),
     params: str = Form("{}"),
 ):
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
+
+    collection = sanitize_collection(collection)
 
     try:
         generator_registry.get_generator(model_id)
@@ -57,7 +70,7 @@ async def create_run_from_image(
     _jobs[job_id] = JobStatus(job_id=job_id, status="pending", progress=0)
     _cancel_events[job_id] = threading.Event()
 
-    background_tasks.add_task(_run_generation, job_id, image_bytes, full_params, "Default")
+    background_tasks.add_task(_run_generation, job_id, image_bytes, full_params, collection)
 
     return {"run_id": job_id, "status": "pending"}
 

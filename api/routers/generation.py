@@ -32,6 +32,22 @@ def _purge_old_jobs() -> None:
         _completed_at.pop(jid, None)
 
 
+def sanitize_collection(collection: str) -> str:
+    """Normalize a caller-supplied collection name into a safe workspace subfolder.
+
+    The value becomes a directory under the workspace (``WORKSPACE_DIR / collection``), so a
+    name carrying a path separator or a drive/wildcard character could escape that root or fail
+    to create on Windows. Such a name, or an empty one, falls back to ``"Default"`` rather than
+    raising, because a generation the caller already paid for should still land somewhere
+    sensible. Shared so every entry point that routes output into a collection sanitizes it the
+    same way; a second copy of this rule is a second chance to forget a character.
+    """
+    collection = (collection or "").strip()
+    if not collection or _re.search(r'[/:*?"<>|\\]', collection):
+        return "Default"
+    return collection
+
+
 @router.post("/from-image")
 async def generate_from_image(
     background_tasks: BackgroundTasks,
@@ -49,10 +65,7 @@ async def generate_from_image(
     if remesh not in ("quad", "triangle", "none"):
         raise HTTPException(400, "remesh must be 'quad', 'triangle', or 'none'")
 
-    # Sanitize collection name: strip, forbid path separators and special chars
-    collection = collection.strip()
-    if not collection or _re.search(r'[/:*?"<>|\\]', collection):
-        collection = "Default"
+    collection = sanitize_collection(collection)
 
     # Verify the requested model exists in the registry
     try:
