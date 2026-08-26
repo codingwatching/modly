@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 
 import routers.workflow_runs as workflow_runs
 from routers.generation import sanitize_collection
@@ -42,6 +42,13 @@ class SanitizeCollectionTests(unittest.TestCase):
         for name in ("../evil", "a/b", "a\\b", "a:b", "a*b", "a?b", 'a"b', "a<b", "a>b", "a|b"):
             self.assertEqual(sanitize_collection(name), "Default", name)
 
+    def test_bare_dot_dot_falls_back_to_default(self) -> None:
+        # ".." contains none of the blocked characters above, so a character blocklist alone
+        # lets it through -- and WORKSPACE_DIR / ".." resolves to the workspace's *parent*,
+        # writing the generated mesh outside the sandboxed root. Containment must be checked
+        # against the resolved path, not just the spelling.
+        self.assertEqual(sanitize_collection(".."), "Default")
+
 
 class CreateRunCollectionTests(unittest.TestCase):
     """The canonical /workflow-runs/from-image must file a run where the caller asked (#238)."""
@@ -78,6 +85,31 @@ class CreateRunCollectionTests(unittest.TestCase):
     def test_a_traversing_collection_is_neutralized(self) -> None:
         # The name becomes a workspace subfolder, so a path-separator name must never survive.
         self.assertEqual(self._collection_forwarded("../../etc"), "Default")
+
+
+class CreateRunRemeshValidationTests(unittest.TestCase):
+    """/generate/from-image rejects an invalid remesh with a 400; this endpoint must too."""
+
+    def setUp(self) -> None:
+        self._previous = workflow_runs.generator_registry
+        workflow_runs.generator_registry = _FakeRegistry()
+
+    def tearDown(self) -> None:
+        workflow_runs.generator_registry = self._previous
+
+    def test_invalid_remesh_is_rejected(self) -> None:
+        background = BackgroundTasks()
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(
+                workflow_runs.create_run_from_image(
+                    background,
+                    image=_FakeUpload(),
+                    model_id="sf3d",
+                    collection="Default",
+                    params='{"remesh": "garbage"}',
+                )
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
 
 
 if __name__ == "__main__":

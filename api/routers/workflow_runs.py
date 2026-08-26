@@ -64,6 +64,11 @@ async def create_run_from_image(
         **model_params,
     }
 
+    # Same constraint /generate/from-image enforces on this field; without it an invalid
+    # value sails past this boundary and only surfaces later, inside the background task.
+    if full_params["remesh"] not in ("quad", "triangle", "none"):
+        raise HTTPException(400, "remesh must be 'quad', 'triangle', or 'none'")
+
     job_id = str(uuid.uuid4())
     image_bytes = await image.read()
 

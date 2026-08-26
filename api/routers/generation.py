@@ -41,11 +41,23 @@ def sanitize_collection(collection: str) -> str:
     raising, because a generation the caller already paid for should still land somewhere
     sensible. Shared so every entry point that routes output into a collection sanitizes it the
     same way; a second copy of this rule is a second chance to forget a character.
+
+    Legality and containment are different questions, so they are asked separately: the
+    reserved characters above are refused outright, and containment is put to the path
+    library rather than to the spelling. A character blocklist alone lets ``".."`` through --
+    it contains none of the listed characters -- and ``WORKSPACE_DIR / ".."`` resolves to the
+    workspace's *parent*, so the generated mesh would land outside the root.
     """
     collection = (collection or "").strip()
     if not collection or _re.search(r'[/:*?"<>|\\]', collection):
         return "Default"
-    return collection
+
+    try:
+        candidate = (WORKSPACE_DIR / collection).resolve()
+    except (OSError, ValueError):
+        return "Default"
+
+    return collection if candidate.parent == WORKSPACE_DIR.resolve() else "Default"
 
 
 @router.post("/from-image")
