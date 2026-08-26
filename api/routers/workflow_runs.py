@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from pydantic import BaseModel
 
 from routers.generation import (
+    VALID_REMESH_MODES,
     _cancel_events,
     _cancelled,
     _jobs,
@@ -43,15 +44,6 @@ async def create_run_from_image(
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
 
-    collection = sanitize_collection(collection)
-
-    try:
-        generator_registry.get_generator(model_id)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    generator_registry.switch_model(model_id)
-
     try:
         model_params = json.loads(params)
     except (json.JSONDecodeError, TypeError):
@@ -64,10 +56,21 @@ async def create_run_from_image(
         **model_params,
     }
 
-    # Same constraint /generate/from-image enforces on this field; without it an invalid
-    # value sails past this boundary and only surfaces later, inside the background task.
-    if full_params["remesh"] not in ("quad", "triangle", "none"):
+    # Same constraint /generate/from-image enforces on this field, checked before touching
+    # the registry below for the same reason that endpoint checks it first: switch_model()
+    # unloads whatever generator is currently active, and a request rejected for a bad
+    # remesh value should not pay for -- or force a reload after -- evicting it.
+    if full_params["remesh"] not in VALID_REMESH_MODES:
         raise HTTPException(400, "remesh must be 'quad', 'triangle', or 'none'")
+
+    collection = sanitize_collection(collection)
+
+    try:
+        generator_registry.get_generator(model_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    generator_registry.switch_model(model_id)
 
     job_id = str(uuid.uuid4())
     image_bytes = await image.read()

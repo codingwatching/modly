@@ -49,6 +49,14 @@ class SanitizeCollectionTests(unittest.TestCase):
         # against the resolved path, not just the spelling.
         self.assertEqual(sanitize_collection(".."), "Default")
 
+    def test_trailing_dots_fall_back_to_default(self) -> None:
+        # Windows silently drops trailing dots from the folder it actually creates, so
+        # "Exports..." and "Exports" would otherwise land in the very same physical directory
+        # -- two collections the caller thinks are distinct merging their output on disk.
+        # (A trailing space is already normalized away by the .strip() above, consistently.)
+        for name in ("Exports.", "Exports..", "..."):
+            self.assertEqual(sanitize_collection(name), "Default", name)
+
 
 class CreateRunCollectionTests(unittest.TestCase):
     """The canonical /workflow-runs/from-image must file a run where the caller asked (#238)."""
@@ -87,6 +95,16 @@ class CreateRunCollectionTests(unittest.TestCase):
         self.assertEqual(self._collection_forwarded("../../etc"), "Default")
 
 
+class _SwitchTrackingRegistry(_FakeRegistry):
+    """Records whether switch_model ran, to prove a rejected request never reaches it."""
+
+    def __init__(self) -> None:
+        self.switched = False
+
+    def switch_model(self, model_id: str) -> None:
+        self.switched = True
+
+
 class CreateRunRemeshValidationTests(unittest.TestCase):
     """/generate/from-image rejects an invalid remesh with a 400; this endpoint must too."""
 
@@ -110,6 +128,25 @@ class CreateRunRemeshValidationTests(unittest.TestCase):
                 )
             )
         self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_invalid_remesh_is_rejected_before_switching_the_active_model(self) -> None:
+        # switch_model() unloads whatever generator is currently active (a blocking call for
+        # subprocess-backed extensions), so a request doomed to a 400 anyway must not pay for
+        # -- or force a reload after -- evicting it.
+        registry = _SwitchTrackingRegistry()
+        workflow_runs.generator_registry = registry
+        background = BackgroundTasks()
+        with self.assertRaises(HTTPException):
+            asyncio.run(
+                workflow_runs.create_run_from_image(
+                    background,
+                    image=_FakeUpload(),
+                    model_id="sf3d",
+                    collection="Default",
+                    params='{"remesh": "garbage"}',
+                )
+            )
+        self.assertFalse(registry.switched)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,10 @@ from schemas.generation import JobStatus
 
 router = APIRouter(tags=["generation"])
 
+# Shared with workflow_runs.create_run_from_image so the two endpoints can't drift apart on
+# what counts as a valid remesh mode the way they had drifted on `collection` before #238.
+VALID_REMESH_MODES = ("quad", "triangle", "none")
+
 _jobs: Dict[str, JobStatus] = {}
 _cancelled: set = set()
 _cancel_events: Dict[str, threading.Event] = {}
@@ -44,20 +48,33 @@ def sanitize_collection(collection: str) -> str:
 
     Legality and containment are different questions, so they are asked separately: the
     reserved characters above are refused outright, and containment is put to the path
-    library rather than to the spelling. A character blocklist alone lets ``".."`` through --
-    it contains none of the listed characters -- and ``WORKSPACE_DIR / ".."`` resolves to the
-    workspace's *parent*, so the generated mesh would land outside the root.
+    library rather than to the spelling -- the same ``relative_to`` check
+    ``generator_registry._path_belongs_to`` uses, so the two containment checks in this
+    backend agree rather than drifting on their own semantics. A character blocklist alone
+    lets ``".."`` through -- it contains none of the listed characters -- and
+    ``WORKSPACE_DIR / ".."`` resolves to the workspace's *parent*, so the generated mesh
+    would land outside the root.
+
+    A name ending in a dot or space is refused too, even once it clears both checks above:
+    Windows silently drops trailing dots/spaces from the final path component it actually
+    creates, so ``mkdir()`` on ``"Exports..."`` lands in the very same folder as
+    ``"Exports"`` -- two collections that look distinct to this function would otherwise
+    merge their output on disk without either caller being told.
     """
     collection = (collection or "").strip()
-    if not collection or _re.search(r'[/:*?"<>|\\]', collection):
+    if (
+        not collection
+        or _re.search(r'[/:*?"<>|\\]', collection)
+        or collection != collection.rstrip(". ")
+    ):
         return "Default"
 
     try:
-        candidate = (WORKSPACE_DIR / collection).resolve()
+        (WORKSPACE_DIR / collection).resolve().relative_to(WORKSPACE_DIR.resolve())
     except (OSError, ValueError):
         return "Default"
 
-    return collection if candidate.parent == WORKSPACE_DIR.resolve() else "Default"
+    return collection
 
 
 @router.post("/from-image")
@@ -74,7 +91,7 @@ async def generate_from_image(
     if not image.content_type or not image.content_type.startswith("image/"):
         raise HTTPException(400, "File must be an image")
 
-    if remesh not in ("quad", "triangle", "none"):
+    if remesh not in VALID_REMESH_MODES:
         raise HTTPException(400, "remesh must be 'quad', 'triangle', or 'none'")
 
     collection = sanitize_collection(collection)
