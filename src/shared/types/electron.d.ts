@@ -129,6 +129,9 @@ declare global {
         maximize: () => void
         close:    () => void
       }
+      notifications: {
+        show: (title: string, body: string) => Promise<{ success: boolean; error?: string }>
+      }
       ui: {
         setZoomFactor: (factor: number) => void
       }
