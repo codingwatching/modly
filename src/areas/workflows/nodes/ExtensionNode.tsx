@@ -203,28 +203,26 @@ export default function ExtensionNode({ id, data, selected }: { id: string; data
 
   // ── IO subheader ─────────────────────────────────────────────────────────
   const ioSubheader = isMulti ? (
-    // Multi-input layout: one row per input, output on first row
+    // Multi-input layout: one row per input (N, not just 2), output on the first row.
+    // Row refs feed the same handleRefs array handlesEl aligns its Handles against.
     <div className="flex flex-col divide-y divide-zinc-800/40">
-      <div ref={ioRowRef} className="flex items-center justify-between px-3 py-2">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[inputs[0]] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
-          {ext?.inputLabels?.[0] ?? inputs[0]}
-        </span>
-        {!isTerminal && (
-          <>
-            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
-              <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
-            </svg>
-            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[ext?.output ?? ''] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
-              {ext?.output ?? '—'}
-            </span>
-          </>
-        )}
-      </div>
-      <div ref={ioRow2Ref} className="flex items-center px-3 py-2">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[inputs[1]] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
-          {ext?.inputLabels?.[1] ?? inputs[1]}
-        </span>
-      </div>
+      {inputs.map((inputType, i) => (
+        <div key={i} ref={(el) => { if (el) handleRefs.current[i] = el }} className="flex items-center justify-between px-3 py-2">
+          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[inputType] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+            {ext?.inputLabels?.[i] ?? inputType}
+          </span>
+          {i === 0 && !isTerminal && (
+            <>
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-600 shrink-0">
+                <line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/>
+              </svg>
+              <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium border ${TAG_CLS[ext?.output ?? ''] ?? 'border-zinc-700 bg-zinc-800 text-zinc-400'}`}>
+                {ext?.output ?? '—'}
+              </span>
+            </>
+          )}
+        </div>
+      ))}
     </div>
   ) : (
     // Single-input layout (existing behavior)
